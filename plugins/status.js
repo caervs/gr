@@ -10,73 +10,93 @@ var fs = require('fs'),
 var exec = require('child_process').exec;
 
 module.exports = function(req, res, next) {
-  var cwd = req.path,
-      tags,
-      dirname = path.dirname(cwd).replace(req.gr.homePath, '~') + path.sep,
-      repos = (req.gr.directories ? req.gr.directories : []),
-      pathMaxLen = repos.reduce(function(prev, current) {
-        return Math.max(prev, current.replace(req.gr.homePath, '~').length + 2);
-      }, 0);
+    var cwd = req.path,
+	tags,
+	dirname = path.dirname(cwd).replace(req.gr.homePath, '~') + path.sep,
+	repos = (req.gr.directories ? req.gr.directories : []),
+	pathMaxLen = repos.reduce(function(prev, current) {
+            return Math.max(prev, current.replace(req.gr.homePath, '~').length + 2);
+	}, 0);
 
-  function pad(s, len) {
-    return (s.toString().length < len ?
-      new Array(len - s.toString().length).join(' ') : '');
-  }
+    function pad(s, len) {
+	return (s.toString().length < len ?
+		new Array(len - s.toString().length).join(' ') : '');
+    }
 
-  // force human format, makes commandRequirements print out when skipping
-  if (!commandRequirements.git({ format: 'json', path: cwd })) {
+    // force human format, makes commandRequirements print out when skipping
+    if (!commandRequirements.git({ format: 'json', path: cwd })) {
 
-    console.log(
-      style(dirname, 'gray') +
-      style(path.basename(cwd), 'white') +
-      pad(dirname + path.basename(cwd), pathMaxLen) + ' ' +
-      style('Missing .git directory', 'red')
-    );
-    return req.done();
-  }
+	console.log(
+	    style(dirname, 'gray') +
+		style(path.basename(cwd), 'white') +
+		pad(dirname + path.basename(cwd), pathMaxLen) + ' ' +
+		style('Missing .git directory', 'red')
+	);
+	return req.done();
+    }
 
-  // search for matching tags
-  tags = req.gr.getTagsByPath(cwd);
+    // search for matching tags
+    tags = req.gr.getTagsByPath(cwd);
 
-  if (req.argv.length > 0 && req.argv[0] == '-v') {
-    console.log(
-      style('\nin ' + dirname, 'gray') +
-      style(path.basename(cwd), 'white') + '\n'
-      );
+    if (req.argv.length > 0 && req.argv[0] == '-v') {
+	console.log(
+	    style('\nin ' + dirname, 'gray') +
+		style(path.basename(cwd), 'white') + '\n'
+	);
 
-    run(['git', '-c', 'color.status=always', 'status', '-sb'], cwd, req.done);
-  } else {
-    var task = exec('git status --branch --porcelain ', {
-        cwd: cwd,
-        maxBuffer: 1024 * 1024 // 1Mb
-      }, function(err, stdout, stderr) {
-        var lines = stdout.split('\n').filter(function(line) {
-          return !!line.trim();
-        });
+	run(['git', '-c', 'color.status=always', 'status', '-sb'], cwd, req.done);
+    } else {
+	var task = exec('git status --branch --porcelain ', {
+            cwd: cwd,
+            maxBuffer: 1024 * 1024 // 1Mb
+	}, function(err, stdout, stderr) {
+	    var branchTask = exec('git branch', {
+		cwd: cwd,
+		maxBuffer: 1024 * 1024,
+	    }, function (btErr, btStdout, btStderr) {
 
-        //remove the branch info so it isn't counted as a change
-        var branchInfo = lines.shift();
+		var currentBranch = ""
+		var branchCount = 0
+		btStdout.split('\n').map(function(line) {
+		    branch = line.trim();
+		    if (branch == "")
+			return
+		    branchCount += 1
+		    if (branch.substring(0, 2) == "* ")
+			currentBranch = branch.substring(2)
+		});
+		if (branchCount != 1) {
+		    currentBranch += " [" + branchCount + "]"
+		}
+		var lines = stdout.split('\n').filter(function(line) {
+		    return !!line.trim();
+		});
 
-        // parse
-        var behind = (branchInfo || '').match(/(\[.+\])/g) || '',
-            modified = (lines.length > 0 ?
-              lines.length + ' modified' :
-              'Clean'
-            );
-        console.log(
-          style(dirname, 'gray') +
-          style(path.basename(cwd), 'white') + pad(dirname + path.basename(cwd), pathMaxLen) + ' ' +
-          style(modified, (lines.length > 0 ? 'red' : 'green')) + pad(modified, 14) +
-          behind + pad(behind, 14) +
-          tags.map(function(s) { return '@' + s; }).join(' ')
-        );
-        if (err !== null) {
-          console.log('exec error: ' + err);
-          if (stderr) {
-            console.log('stderr: ' + stderr);
-          }
-        }
-        req.done();
-      });
-  }
+		//remove the branch info so it isn't counted as a change
+		var branchInfo = lines.shift();
+
+		// parse
+		var behind = (branchInfo || '').match(/(\[.+\])/g) || '',
+		    modified = (lines.length > 0 ?
+				lines.length + ' modified' :
+				'Clean'
+			       );
+		console.log(
+		    style(dirname, 'gray') +
+			style(path.basename(cwd), 'white') + pad(dirname + path.basename(cwd), pathMaxLen) + ' ' +
+			style(modified, (lines.length > 0 ? 'red' : 'green')) + pad(modified, 14) +
+			behind + pad(behind, 14) +
+			style(currentBranch, (currentBranch == 'master' ? 'green' : 'yellow')) + pad(currentBranch, 30) +
+			tags.map(function(s) { return '@' + s; }).join(' ')
+		);
+		if (err !== null) {
+		    console.log('exec error: ' + err);
+		    if (stderr) {
+			console.log('stderr: ' + stderr);
+		    }
+		}
+		req.done();
+	    });
+	});
+    }
 };
